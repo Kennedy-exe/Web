@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <link rel="stylesheet" href="css.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Player Pro</title>
+</head>
+<body>
+
+    <div class="container">
+        <div class="search">
+            <input type="text" id="search" placeholder="Pesquisar artista ou música...">
+        </div>
+
+        <div id="secaoFavoritos" style="display: none; margin-bottom: 50px;">
+            <h2 style="color: hsla(183, 100%, 51%, 0.732); margin-bottom: 20px;">Minhas Favoritas</h2>
+            <div class="grid" id="gridFavoritos"></div>
+            <hr style="border: 0; border-top: 1px solid hsla(183, 100%, 51%, 0.732); margin: 40px 0;">
+        </div>
+
+        <h2 id="tituloBusca" style="display: none; color: hsla(183, 100%, 51%, 0.732); margin-bottom: 20px;">Resultados</h2>
+        <div class="grid" id="grid"></div>
+    </div>
+
+    <script>
+        const search = document.getElementById('search');
+        const grid = document.getElementById("grid");
+        const gridFavoritos = document.getElementById("gridFavoritos");
+        const secaoFavoritos = document.getElementById("secaoFavoritos");
+        const tituloBusca = document.getElementById("tituloBusca");
+
+        // PERSISTÊNCIA*
+        const STORAGE_KEY = 'musicas_favoritas';
+
+        function getFavoritos() {
+            const favs = localStorage.getItem(STORAGE_KEY);
+            return favs ? JSON.parse(favs) : [];
+        }
+        // Tratamento dos favoritos
+        function alternarFavorito(musica) {
+            let favoritos = getFavoritos();
+            const index = favoritos.findIndex(f => f.trackId === musica.trackId);
+
+            if (index > -1) {
+                favoritos.splice(index, 1); // Remove se já existir
+            } else {
+                favoritos.push(musica); // Adiciona se não existir
+            }
+
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(favoritos));
+            renderizarFavoritos();
+            // Atualiza o botão no grid de busca se ele estiver aberto
+            buscarMusicas(search.value, false); 
+        }
+
+        // RENDERIZAÇÃO*
+        function criarCard(item, ehFavorito) {
+            const cover = item.artworkUrl100.replace('100x100bb', '400x400bb');
+            const musicaJson = JSON.stringify(item).replace(/'/g, "&apos;");
+
+            return `
+                <div class="card">
+                    <div class="card-inner">
+                        <div class="card-front">
+                            <img src="${cover}" alt="${item.trackName}">
+                        </div>
+                        <div class="card-back">
+                            <h3>${item.artistName}</h3>
+                            <p><strong>${item.trackName}</strong></p>
+                            <audio controls src="${item.previewUrl}" class="player-audio"></audio>
+                            <button class="btn-fav ${ehFavorito ? 'active' : ''}" 
+                                    onclick='alternarFavorito(${musicaJson})'>
+                                ${ehFavorito ? 'Remover' : 'Favoritar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Quando tocar
+        document.addEventListener("play", function(e) {
+            if (e.target.tagName === "AUDIO") {
+
+                const todosAudios = document.querySelectorAll("audio");
+
+                todosAudios.forEach(audio => {
+                    const card = audio.closest(".card");
+
+                    // Pausa os outros áudios
+                    if (audio !== e.target) {
+                        audio.pause();
+                        audio.currentTime = 0;
+                    }
+
+                    // Remove foco de todos os cards
+                    if (card) {
+                        card.classList.remove("ativo");
+                    }
+                });
+
+                // Adiciona foco no card atual
+                const cardAtual = e.target.closest(".card");
+                if (cardAtual) {
+                    cardAtual.classList.add("ativo");
+                }
+            }
+        }, true);
+
+
+        // Quando pausar (manual)
+        document.addEventListener("pause", function(e) {
+            if (e.target.tagName === "AUDIO") {
+
+                // Verifica se ainda existe algum áudio tocando
+                const algumTocando = Array.from(document.querySelectorAll("audio"))
+                    .some(audio => !audio.paused);
+
+                // Se nenhum estiver tocando, remove o foco
+                if (!algumTocando) {
+                    const card = e.target.closest(".card");
+                    if (card) {
+                        card.classList.remove("ativo");
+                    }
+                }
+            }
+        }, true);
+
+        // Ajuste do volume
+        function ajustarVolume() {
+            const audios = document.querySelectorAll('.player-audio');
+            audios.forEach(audio => {
+                audio.volume = 0.25; // Define 25% de volume
+            });
+        }
+
+        function renderizarFavoritos() {
+            const favoritos = getFavoritos();
+            if (favoritos.length > 0) {
+                secaoFavoritos.style.display = 'block';
+                gridFavoritos.innerHTML = favoritos.map(m => criarCard(m, true)).join('');
+                ajustarVolume();
+            } else {
+                secaoFavoritos.style.display = 'none';
+            }
+        }
+        // limpa o titulo após pesquisar
+        async function buscarMusicas(nome, resetarTitulo = true) {
+            if (!nome.trim()) {
+                grid.innerHTML = "";
+                tituloBusca.style.display = 'none';
+                return;
+            }
+
+            try {
+                const url = `https://itunes.apple.com/search?term=${encodeURIComponent(nome)}&entity=song&limit=12`;
+                const res = await fetch(url);
+                const data = await res.json();
+                const favoritos = getFavoritos();
+
+                if (resetarTitulo) tituloBusca.style.display = 'block';
+                
+                grid.innerHTML = data.results.map(item => {
+                    const jaEhFav = favoritos.some(f => f.trackId === item.trackId);
+                    return criarCard(item, jaEhFav);
+                }).join('');
+
+                ajustarVolume();
+
+            } catch (erro) {
+                console.error("Erro:", erro);
+            }
+        }
+
+        // EVENTOS*
+        let timeout;
+        search.addEventListener("input", () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => buscarMusicas(search.value), 600);
+        });
+
+        // Inicialização
+        renderizarFavoritos();
+    </script>
+</body>
+</html>
